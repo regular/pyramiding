@@ -1,0 +1,44 @@
+Q: What do zip files and mpeg4 files have in common?
+A: Both are containers. In the first case for more files, in the latter case for one or more video and or audio streams. A video stream again is a container -- it contains still images. A file in the zip file most likely also is a container for something else.
+
+In general, most file formats can be considered containers for subparts which in turn also are containers. This is a hierarchical recursive structure much like a directory tree.
+
+pyramiding generalises traversal and read access of such a tree of containers, no matter if it is a directory tree or some structure inside a file.
+
+pyramiding consists of several python modules that can be seen as 'drivers' for a specific file format. Such a driver is called 'Archive'. Archives know how to iterate over the contents of a file they support, provide data streams (file-like objects) for each item they contain and meta data about those items. Data stream and meta data are combined by 'Resources'.
+
+An Archive contains Resourcees, a Resource is the input data stream of an Archive instance. Archives read a Resource to enumerate its children.
+
+Archives are used by Resources internally. The class Resource is the only visible class outside pyrmaiding.
+
+pyramiding will use lazy evaluation and caching to free the developer from efficiency concerns.
+
+from pyRamiding import Resource
+
+try:
+	data = Resource(file("videos.tar"))
+	name = data["info.ini"]["section1"]["name"].read()
+	# smae as data.find("info.ini/section1/name").as_string()
+	image_resource, location = data.find("icon.jpg/image"), data.find("icon.jpg/exif/geo-location")
+	width, height = image_resource.details.width, image_resource.details.height 
+	rgb_data = image_resource.read()
+
+	for version in data.find("versions"):
+		if version["video"].details.width >= desired_width:
+			break
+
+	print "Selected video file %(name)s, size: %(width)d x %(height)d pixels" % version["video"].details
+
+	last_frame_data = version["video"][version["video"].details.frame_count - 1].read()
+except ResourceNotFound, e:
+	print e.path, "does not exist"
+
+As a first milestone, the following Archives will be implemented (probably even in this order)
+
+- ini
+- tar
+- json, js
+- png
+- jpg, jpeg
+- mpg, mpeg, mp4
+- zip
