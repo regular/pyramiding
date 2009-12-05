@@ -1,12 +1,14 @@
 import re
+from collections import namedtuple
 
 class MalformedPlaneFormat(Exception):
     pass
 
-class PixelPlaneFormat(tuple):
-    '''PixelFormat describes the layout of one plane of pixel data. See PixelFormat for                         
+class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling")):
+    '''PixelFormat describes the layout of one plane of pixel data. See __new__ for                         
        details.
     '''
+    __slots__ = ()
     
     _layput_pattern1 = re.compile(r"(?:[a-zA-Z]\d+)+")
     _find_pattern1 = re.compile(r"([a-zA-Z])(\d+)")
@@ -20,14 +22,23 @@ class PixelPlaneFormat(tuple):
            x-divisor and y-divisor are horizontal and vertical subsampling factors.
            if n is one, it can be omitted
            if subsampling is (1,1) it can be omitted, too.
+           Layout can have one or two forms:
+           <char><int><char><int> ...
+           or
+           <char><char><char> ... <int><int><int> ...
+           Where <char> is a single character indicating the 'name' of a color channel
+           (like r, g, b, a, y, u, v, l etc)
+           and n is a number indicating the number of bits this channel uses.
+           In the second form the number of bits is restricted to a single digit (1-9).
         '''
 
         t = cls._parse_plane(plane_description)
         if t is None:
             raise MalformedPlaneFormat()
-        return tuple.__new__(cls, t)
+        return cls._make(t)
 
-    def _get_bits_per_sample(self):
+    @property
+    def bits_per_sample(self):
         '''return number of bits per sample in this plane.'''
         plane_total = 0.0
         n, layout, subsampling = self
@@ -36,6 +47,32 @@ class PixelPlaneFormat(tuple):
                 plane_total += width
         return plane_total
 
+    @property
+    def name(self):
+        n, channels, subsampling = self
+        # if n is one and subsampling is (1,1)
+        # we simply concatente channel names and bit widths in order
+        if n==1 and subsampling==(1,1):
+            sorted_channels = [(pos, name) for name, pos in channels]
+            sorted_channels.sort()
+            i = 0
+            result=""
+            for pos, name in sorted_channels:
+                if len(pos)>1:
+                    # uh, the channel is not a continous range in memory
+                    result = None
+                    break 
+                start, width = pos[0]
+                if start != i: 
+                    result=None
+                    break
+                result += "%s%d" % (name, width)
+                i += width
+            if result:
+                return result
+   
+    ## private implementation
+    
     @classmethod
     def _parse_plane(cls, x):
         if type(x) == cls:
@@ -96,17 +133,19 @@ class PixelPlaneFormat(tuple):
 class PixelFormat(tuple):
     '''PixelFormat describes the layout of one or more planes of pixel data'''
     
+    __slots__ = ()
+
     # The tuples and names below can be considered
     # examples of different forms of valied PixelFormat descriptors that can be
     # passed to PixelFormat.__new__
-    _named_formats = {
-        'yuv420p': ('y8', ('u8', (2,2)), ('v8', (2,2))),
-        'yuv422p': ('y8', ('u8', (2,1)), ('v8', (2,1))),
-        'uyvy'   : (2, 'u8y8v8y8'),
-        'rgb'    : 'r8g8b8',
-        'xrgb'   : 'x8r8g8b8',
-        'rgba'   : 'r8g8b8a8',
-    }
+    _named_formats = dict(
+        yuv420p = ('y8', ('u8', (2,2)), ('v8', (2,2))),
+        yuv422p = ('y8', ('u8', (2,1)), ('v8', (2,1))),
+        uyvy    = (2, 'u8y8v8y8'),
+        rgb     = 'r8g8b8',
+        xrgb    = 'x8r8g8b8',
+        rgba    = 'r8g8b8a8',
+    )
     
     # cache for bits per pixels
     _bpp = {}
@@ -117,6 +156,8 @@ class PixelFormat(tuple):
         '''description can be a name string, a plane description ar
         a tuple of plane descriptions.
         See PixelPlaneFormat.__new__ for details.
+        If the last character of a name string is 'p' each channel
+        is considered to be on its own plane.
         Instances of PixelFormat are immutable and therefor can be used as dictionary
         keys. (There are just tuples with some additional methods.)
         '''
@@ -132,48 +173,96 @@ class PixelFormat(tuple):
         if planes is None:
             planes = cls._parse_description(description)
         return tuple.__new__(cls, planes)
-            
-    def _get_name(self):
+    
+    @property        
+    def name(self):
         '''return a normalized string identifier that is accepted by __new__()'''
         for k,v in self._named_formats.items():
             if v == self:
                 return k
-        # XXX: synthesize a nicer name!
+        # XXX: synthesize a nicer name for yuv formats!
         # make sure __new__ accepts it!
+        
+        if len(self) == 1:
+            return self[0].name
+        else:
+            plane_names = [p.name for p in self]
+            if None not in plane_names:
+                return "".join(plane_names)+"p"
         return str(self)
-    name = property(_get_name, None)
-           
-    def _get_bits_per_pixel(self):
+    
+    @property   
+    def bits_per_pixel(self):
         '''return the number of bits required to store one pixel in this format'''
         if self in self._bpp.keys():
             return self._bpp[self]
             
         total = 0.0
         for p in self:
-            plane_total = p._get_bits_per_sample()
+            plane_total = p.bits_per_sample
             n, d, subsampling = p
             plane_total /= n * (lambda x, y: x*y)(*subsampling)
             total += plane_total
             
         PixelFormat._bpp[self] = total
         return total
-    bits_per_pixel = property(_get_bits_per_pixel, None)
   
     is_planar = property(lambda self: len(self)>1)
     plane_count = property(lambda self: len(self))
     
+    ## private implementation
+    
     @classmethod
     def _parse_description(cls, description):
+        make_planar = False
         if type(description) == str:
             yuv_format = cls._parse_yuv_name(description)
             if yuv_format:
                 description = yuv_format
+            else:
+                if description[-1].lower()=="p":
+                    make_planar=True
+                    description = description[:-1]
                 
         if type(description) == tuple or type(description) == list:
-            return cls._parse_planes(description)
+            result = cls._parse_planes(description)
         else:
-            return (PixelPlaneFormat(description),)
+            result = (PixelPlaneFormat(description),)
+            
+        if make_planar:
+            result = cls._make_planar(result)
+        return result
  
+    @classmethod
+    def _make_planar(cls, t):
+        '''convert a given non-planar format into a planar format
+           by putting each channel on a separate plane.
+           If channels are not continous within a pixel,
+           there will be one plane per continois region.
+        '''
+        assert len(t)==1
+        n, channels, subsampling = t[0]
+        
+        sorted_channels = [] # [(pos, name)]
+        for name, pos in channels:
+            sorted_channels += zip(pos, [name]*len(pos))
+        
+        sorted_channels.sort()
+        planes = []
+        for pos, name in sorted_channels:
+            start, width = pos
+            planes.append(
+                PixelPlaneFormat(
+                    (   n, 
+                        (
+                            ( name, ((0, width),) ),
+                        ),    
+                        subsampling
+                    )
+                )
+            )
+        return tuple(planes)
+                   
     @classmethod        
     def _parse_yuv_name(cls, name):
         m = cls._yuv_pattern.match(name)
@@ -241,5 +330,10 @@ assert PixelFormat("yuv420p").plane_count == 3
     
 assert PixelFormat("YUV 4:4:0") == PixelFormat(('y8', ('u8',(1,2)), ('v8',(1,2))))
 assert PixelFormat("YUV 4:4:4") == PixelFormat(('y8', 'u8', 'v8'))
+
+assert PixelFormat("l8").name == PixelFormat("l8p").name
+assert PixelFormat(PixelFormat("rgb888").name) == PixelFormat("rgb888")
+assert PixelFormat(PixelFormat("rgb888p").name) == PixelFormat("rgb888p")
+
 
     
