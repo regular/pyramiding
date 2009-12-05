@@ -21,6 +21,7 @@ class PixelFormat(tuple):
     _find_pattern1 = re.compile(r"([a-zA-Z])(\d+)")
 
     _layput_pattern2 = re.compile(r"([a-zA-Z]+)(\d+)")
+    _yuv_pattern = re.compile(r"yuv\s?(\d):?(\d):?(\d)p?", re.I)
     
     def __new__(cls, description):
         '''description can be a name, a plane description ar a tuple of plane descriptions
@@ -43,7 +44,7 @@ class PixelFormat(tuple):
         if planes is None:
             planes = cls._parse_description(description)
         return tuple.__new__(cls, planes)
-    
+            
     def _get_name(self):
         for k,v in self._named_formats.items():
             if v == self:
@@ -79,13 +80,37 @@ class PixelFormat(tuple):
     is_planar = property(lambda self: len(self)>1)
     plane_count = property(lambda self: len(self))
     
-    @classmethod   
+    @classmethod
     def _parse_description(cls, description):
+        if type(description) == str:
+            yuv_format = cls._parse_yuv_name(description)
+            if yuv_format:
+                description = yuv_format
+                
         if type(description) == tuple or type(description) == list:
             return cls._parse_planes(description)
         else:
             return (cls._parse_plane(description),)
-    
+ 
+    @classmethod        
+    def _parse_yuv_name(cls, name):
+        m = cls._yuv_pattern.match(name)
+        if m:
+            # see http://en.wikipedia.org/wiki/Chroma_subsampling
+            # to understand this
+            luma_width, chroma_samples_row1, chroma_samples_row2  = [int(x) for x in m.groups()]
+            horizontal_subsampling = float(luma_width) / chroma_samples_row1
+            vertical_subsampling = None
+            if chroma_samples_row2 == 0:
+                vertical_subsampling = 2
+            elif chroma_samples_row2 == chroma_samples_row1:
+                 vertical_subsampling = 1
+            else:
+                raise NotImplemented("chroma subsampling with different Y:Cr ratios for odd and even lines is not supported")
+            subsampling = (horizontal_subsampling, vertical_subsampling)
+            return ('y8', ('u8', subsampling), ('v8', subsampling))
+        return None
+   
     @classmethod        
     def _parse_planes(cls, one_or_more_planes):        
         # is it a single plane?
@@ -169,6 +194,9 @@ assert PixelFormat("rgb") == ((1, (('r', ((0, 8),)), ('b', ((16, 8),)), ('g', ((
 assert PixelFormat("yuv420p") == ((1, (('y', ((0, 8),)),), (1, 1)), (1, (('u', ((0, 8),)),), (2, 2)), (1, (('v', ((0, 8),)),), (2, 2)))
 
 
+assert PixelFormat("YUV 4:2:0").name == "yuv420p"
+assert PixelFormat("yuv420p") == PixelFormat("YUV 4:2:0")
+
 assert PixelFormat._named_formats["rgb"] == PixelFormat("rgb")
 
 assert PixelFormat("rgb").name == "rgb"
@@ -184,10 +212,8 @@ assert PixelFormat("rgb").is_planar == False
 assert PixelFormat("rgb").plane_count == 1
 assert PixelFormat("yuv420p").is_planar == True
 assert PixelFormat("yuv420p").plane_count == 3
-
-print PixelFormat._bpp
-
-
+    
+print PixelFormat("YUV 4:2:0")
 
 
     
