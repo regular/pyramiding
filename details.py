@@ -15,6 +15,8 @@ class PixelFormat(tuple):
         'rgba'   : 'r8g8b8a8',
     }
     
+    _bpp = {}
+    
     _layput_pattern1 = re.compile(r"(?:[a-zA-Z]\d+)+")
     _find_pattern1 = re.compile(r"([a-zA-Z])(\d+)")
 
@@ -51,21 +53,26 @@ class PixelFormat(tuple):
        
     def _get_bits_per_sample(self, plane):
         if type(plane) == int:
-            plane = self(plane)
+            plane = self[plane]
         plane_total = 0.0
-        n, d, subsampling = plane
-        for channel in d.values():
-            for start, width in channel:
+        n, layout, subsampling = plane
+        for channel, fractions in layout:
+            for start, width in fractions:
                 plane_total += width
         return plane_total
     
     def _get_bits_per_pixel(self):
+        if self in self._bpp.keys():
+            return self._bpp[self]
+            
         total = 0.0
         for p in self:
             plane_total = self._get_bits_per_sample(p)
             n, d, subsampling = p
             plane_total /= n * (lambda x, y: x*y)(*subsampling)
             total += plane_total
+            
+        PixelFormat._bpp[self] = total
         return total
     bits_per_pixel = property(_get_bits_per_pixel, None)
   
@@ -77,50 +84,49 @@ class PixelFormat(tuple):
         if type(description) == tuple or type(description) == list:
             return cls._parse_planes(description)
         else:
-            return cls._parse_planes((description,))
+            return (cls._parse_plane(description),)
     
     @classmethod        
-    def _parse_planes(cls, one_or_more_planes):
-        cls._planes = []
-        
+    def _parse_planes(cls, one_or_more_planes):        
         # is it a single plane?
         t = cls._parse_plane(one_or_more_planes)
         if t is not None: 
-            n, layout, subsampling = t
-            channels = cls._parse_layout(layout)
-            if channels is not None:
-                return [(n, channels, subsampling)]
+            return (t,)
         
         planes = []
         for x in one_or_more_planes:
             t = cls._parse_plane(x)
-            
-            try:
-                n, layout, subsampling = t
-            except TypeError:
+            if t==None:
                 raise MalformedPlaneFormat()
-                
-            planes.append((n, cls._parse_layout(layout), subsampling))
+            planes.append(t)
         return tuple(planes)
     
     @classmethod
     def _parse_plane(cls, x):
         t = None
         if type(x) == str:
-            t = 1, x, (1,1)
+            t = (1, x, (1,1))
         elif type(x) == tuple:
             if len(x) == 3:
                 t = x
             if len(x) == 2:
-                if (type(x[0])==str or type(x[0])==dict) and type(x[1])==tuple:
+                if (type(x[0])==str or type(x[0])==tuple) and type(x[1])==tuple:
                     t = (1,) + x
-                elif type(x[0]) == int and (type(x[1]) == str or type(x[1])==dict):
+                elif type(x[0]) == int and (type(x[1]) == str or type(x[1])==tuple):
                     t = x + ((1,1),)
-        return t
+        
+        if t is None: return None
+        n, layout, subsampling = t
+        if not type(n) == int or not type(subsampling) == tuple or not len(subsampling)==2:
+            return None
+        channels = cls._parse_layout(layout)
+        if channels is not None:
+            return (n, channels, subsampling)
+        return None
     
     @classmethod
     def _parse_layout(cls, s):
-        if type(s) == dict:
+        if type(s) == tuple:
             return s
         if type(s) != str:
             return None
@@ -146,25 +152,40 @@ class PixelFormat(tuple):
                 d[name].append((pos, width))
                 
             pos += width
-        return d
-    
+        for k,v in d.items(): d[k]=tuple(v)
+        return tuple(d.items())
     
         
-print PixelFormat("rgb") == PixelFormat("rgb888")
-print PixelFormat("rgb888") == PixelFormat("r8g8b8")
-print PixelFormat("rgb") != PixelFormat("xrgb")
 
-print PixelFormat("uyvy")
-print PixelFormat._named_formats["rgb"]
-print PixelFormat("rgb").name
-print PixelFormat("rgb").bits_per_pixel
-print PixelFormat("uyvy").bits_per_pixel
-print PixelFormat("yuv420p").bits_per_pixel
-print PixelFormat("yuv420p").name
-print PixelFormat("rgb").is_planar
-print PixelFormat("rgb").plane_count
-print PixelFormat("yuv420p").is_planar
-print PixelFormat("yuv420p").plane_count
+assert PixelFormat("rgb") == PixelFormat("rgb888")
+assert PixelFormat("rgb888") == PixelFormat("r8g8b8")
+assert PixelFormat("rgb") != PixelFormat("xrgb")
+
+assert PixelFormat("uyvy") == ((2, (('y', ((8, 8), (24, 8))), ('u', ((0, 8),)), ('v', ((16, 8),))), (1, 1)),)
+
+
+assert PixelFormat("rgb") == ((1, (('r', ((0, 8),)), ('b', ((16, 8),)), ('g', ((8, 8),))), (1, 1)),)
+
+assert PixelFormat("yuv420p") == ((1, (('y', ((0, 8),)),), (1, 1)), (1, (('u', ((0, 8),)),), (2, 2)), (1, (('v', ((0, 8),)),), (2, 2)))
+
+
+assert PixelFormat._named_formats["rgb"] == PixelFormat("rgb")
+
+assert PixelFormat("rgb").name == "rgb"
+assert PixelFormat("rgb888").name == "rgb"
+assert PixelFormat("r8g8b8").name == "rgb"
+
+assert PixelFormat("rgb").bits_per_pixel == 24
+assert PixelFormat("rgba").bits_per_pixel == 32
+assert PixelFormat("uyvy").bits_per_pixel == 16
+assert PixelFormat("yuv420p").bits_per_pixel == 12
+assert PixelFormat("yuv420p").name == "yuv420p"
+assert PixelFormat("rgb").is_planar == False
+assert PixelFormat("rgb").plane_count == 1
+assert PixelFormat("yuv420p").is_planar == True
+assert PixelFormat("yuv420p").plane_count == 3
+
+print PixelFormat._bpp
 
 
 
