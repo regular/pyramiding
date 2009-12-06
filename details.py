@@ -47,6 +47,32 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
             for start, width in fractions:
                 plane_total += width
         return plane_total
+   
+    def __repr__(self):
+        name = self.name
+        if name is not None:
+            return "'%s'" % name
+        span, channels, subsampling = self
+        s = ""
+        if span != 1:
+            s += "%d, " % span
+        
+        chs = []
+        for name, pos in channels:
+            if len(pos)==1 and pos[0][0]==0:
+                ch = "'%s%d'" % (name, pos[0][1])
+            else:
+                ch = "('%s', %s)" % (name,repr(pos))
+            chs.append(ch)
+        chs = ", ".join(chs)
+        if len(channels) > 1:
+            chs = "(%s)" % chs
+        s+= chs
+        if subsampling != (1,1):
+            s += ", " + repr(subsampling)
+
+        s = '(%s)' %s
+        return s     
     
     @property
     def name(self):
@@ -71,6 +97,7 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
                 i += width
             if result:
                 return result
+        return None
     
     ## private implementation
     
