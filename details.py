@@ -15,7 +15,8 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
     
     _layput_pattern2 = re.compile(r"([a-zA-Z]+)(\d+)")
     
-    def __new__(cls, plane_description):
+    @classmethod
+    def from_description(cls, plane_description):
         '''A plane descriptions is a tuple (n, layout, (x-divisor, y-divisor))
            where n is the number of pixels described (the pixel_span, usually one or two)
            layout is a string that describes the dstribution of channel bits inside n pixels
@@ -155,7 +156,7 @@ class PixelFormat(tuple):
     def __new__(cls, description):
         '''description can be a name string, a plane description ar
         a tuple of plane descriptions.
-        See PixelPlaneFormat.__new__ for details.
+        See PixelPlaneFormat.from_description() for details.
         If the last character of a name string is 'p' each channel
         is considered to be on its own plane.
         Instances of PixelFormat are immutable and therefor can be used as dictionary
@@ -222,14 +223,20 @@ class PixelFormat(tuple):
             if yuv_format:
                 description = yuv_format
             else:
-                if description[-1].lower()=="p":
+                if description[0]=="(" and description[-1] == ")":
+                    # evaluate repr string in a sondbox without __builtins__
+                    result = eval(description, dict(__builtins__=None), dict(PixelPlaneFormat=PixelPlaneFormat))
+                    if type(result) == tuple:
+                        description = result
+                
+                elif description[-1].lower()=="p":
                     make_planar=True
                     description = description[:-1]
         
         if type(description) == tuple or type(description) == list:
             result = cls._parse_planes(description)
         else:
-            result = (PixelPlaneFormat(description),)
+            result = (PixelPlaneFormat.from_description(description),)
         
         if make_planar:
             result = cls._make_planar(result)
@@ -255,12 +262,11 @@ class PixelFormat(tuple):
             start, width = pos
             planes.append(
                 PixelPlaneFormat(
-                    (   n,
-                        (
-                            ( name, ((0, width),) ),
-                        ),
-                        subsampling
-                    )
+                    n,
+                    (
+                        ( name, ((0, width),) ),
+                    ),
+                    subsampling
                 )
             )
         return tuple(planes)
@@ -348,13 +354,13 @@ class PixelFormat(tuple):
     def _parse_planes(cls, one_or_more_planes):
         # is it a single plane?
         try:
-            return (PixelPlaneFormat(one_or_more_planes),)
+            return (PixelPlaneFormat.from_description(one_or_more_planes),)
         except MalformedPlaneFormat:
             pass # no, it wasn't
         
         planes = []
         for x in one_or_more_planes:
-            t = PixelPlaneFormat(x)
+            t = PixelPlaneFormat.from_description(x)
             planes.append(t)
         return tuple(planes)
 
@@ -408,3 +414,8 @@ assert PixelFormat(PixelFormat("yuv888p").name) == PixelFormat("yuv888p")
 assert PixelFormat("yua422p").name == 'y4u2a2p'
 
 # XXX maybe it is a good idea to drop postfix bit width specification because of this
+
+planes = PixelFormat("yuv420p")
+pf = PixelFormat((planes[0]._replace(subsampling=(2,2)), planes[1], planes[2]))
+assert pf.name == "(PixelPlaneFormat(span=1, channels=(('y', ((0, 8),)),), subsampling=(2, 2)), PixelPlaneFormat(span=1, channels=(('u', ((0, 8),)),), subsampling=(2, 2)), PixelPlaneFormat(span=1, channels=(('v', ((0, 8),)),), subsampling=(2, 2)))"
+assert pf == PixelFormat(pf.name)
