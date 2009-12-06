@@ -393,6 +393,8 @@ class PixelFormat(tuple):
             else:
                 raise NotImplemented("chroma subsampling with different Y:Cr ratios for odd and even lines is not supported")
             subsampling = (horizontal_subsampling, vertical_subsampling)
+            # prefer int over float, if possible
+            subsampling = tuple([int(x) if x==round(x) else x for x in subsampling])
             return ('y8', ('u8', subsampling), ('v8', subsampling))
         return None
     
