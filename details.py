@@ -85,10 +85,13 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
             if len(x) == 3:
                 t = x
             if len(x) == 2:
-                if (type(x[0])==str or type(x[0])==tuple) and type(x[1])==tuple:
-                    t = (1,) + x
-                elif type(x[0]) == int and (type(x[1]) == str or type(x[1])==tuple):
+                if type(x[0]) == int and (type(x[1]) == str or type(x[1])==tuple):
                     t = x + ((1,1),)
+                elif (type(x[0])==str or type(x[0])==tuple) and type(x[1])==tuple:
+                    # can x[1] be a subsampling spec?
+                    # XXX this is ugly
+                    if len(x[1]) == 2 and type(x[1][0])  in (int, float) and type(x[1][1]) in (int, float): 
+                        t = (1,) + x
         
         if t is None: return None
         n, layout, subsampling = t
@@ -140,12 +143,55 @@ class PixelFormat(tuple):
     # examples of different forms of valied PixelFormat descriptors that can be
     # passed to PixelFormat.__new__
     _named_formats = dict(
-        yuv420p = ('y8', ('u8', (2,2)), ('v8', (2,2))),
-        yuv422p = ('y8', ('u8', (2,1)), ('v8', (2,1))),
-        uyvy    = (2, 'u8y8v8y8'),
-        rgb     = 'r8g8b8',
-        xrgb    = 'x8r8g8b8',
-        rgba    = 'r8g8b8a8',
+        rgb         = 'r8g8b8',
+        xrgb        = 'x8r8g8b8',
+        rgba        = 'r8g8b8a8',
+
+        gray8	    = 'y8',	#        Y        ,  8bpp
+        monowhite	= 'k1',	#        Y        ,  1bpp, 0 is white, 1 is black
+        monoblack	= 'y1',	#        Y        ,  1bpp, 0 is black, 1 is white
+        pal8	    = 'i8',	# 8 bit with RGB32 palette
+        
+        uyvy422     = (2, 'u8y8v8y8'),      # XXX UV or VU? XXX Packed YUV 4:2:2, 16bpp, Cb Y0 Cr Y1     
+        yuyv422	    = (2, 'y8u8y8v8'),	    # Packed YUV 4:2:2, 16bpp, Y0 Cb Y1 Cr
+        uyyvyy411	= (4, 'u8y8y8v8y8y8'),	# Packed YUV 4:1:1, 12bpp, Cb Y0 Y1 Cr Y2 Y3
+
+        yuva420p	= ('y8', ('u8', (2,2)), ('v8', (2,2)), 'a8'),	# Planar YUV 4:2:0, 20bpp, (1 Cr & Cb sample per 2x2 Y & A samples)
+        nv12	    = ('y8', ('u8v8', (2, 2))),	# Planar YUV 4:2:0, 12bpp, 1 plane for Y and 1 for UV
+        nv21	    = ('y8', ('v8u8', (2, 2))),	# as above, but U and V bytes are swapped
+
+        # generic formats don't need to be declared
+        #yuv422p	= ''	# Planar YUV 4:2:2, 16bpp, (1 Cr & Cb sample per 2x1 Y samples)
+        #yuv444p	= ''	# Planar YUV 4:4:4, 24bpp, (1 Cr & Cb sample per 1x1 Y samples)
+        #yuv410p	= ''	# Planar YUV 4:1:0,  9bpp, (1 Cr & Cb sample per 4x4 Y samples)
+        #yuv411p	= ''	# Planar YUV 4:1:1, 12bpp, (1 Cr & Cb sample per 4x1 Y samples)
+        #yuv440p	= ''	# Planar YUV 4:4:0 (1 Cr & Cb sample per 1x2 Y samples)
+
+        # Jpeg specific formats not yet supported
+        #yuvj420p	= ''	# Planar YUV 4:2:0, 12bpp, full scale (jpeg)
+        #yuvj422p	= ''	# Planar YUV 4:2:2, 16bpp, full scale (jpeg)
+        #yuvj444p	= ''	# Planar YUV 4:4:4, 24bpp, full scale (jpeg)     
+        #yuvj440p	= ''	# Planar YUV 4:4:0 full scale (jpeg)
+
+        # XXX need a way to express endianness 
+        # rgb32     = 'x8r8g8b',    # Packed RGB 8:8:8, 32bpp, (msb)8A 8R 8G 8B(lsb), in cpu endianness
+        # rgb24     = 'r8g8b8', # Packed RGB 8:8:8, 24bpp, RGBRGB...
+        # bgr24     = 'b8g8r8', # Packed RGB 8:8:8, 24bpp, BGRBGR...
+        # bgr32     = 'x8b8g8r8',   # Packed RGB 8:8:8, 32bpp, (msb)8A 8B 8G 8R(lsb), in cpu endianness
+        # bgr565        = 'b5g6r5'  # Packed RGB 5:6:5, 16bpp, (msb)   5B 6G 5R(lsb), in cpu endianness
+        # bgr555        = 'x1b5g5r5'    # Packed RGB 5:5:5, 16bpp, (msb)1A 5B 5G 5R(lsb), in cpu endianness most significant bit to 1
+        # rgb565        = 'r5g6b5', # Packed RGB 5:6:5, 16bpp, (msb)   5R 6G 5B(lsb), in cpu endianness
+        # bgr8      = 'b3g3r2', # Packed RGB 3:3:2,  8bpp, (msb)2B 3G 3R(lsb)
+        # bgr4      = 'b1g2r1', # Packed RGB 1:2:1,  4bpp, (msb)1B 2G 1R(lsb)
+        # bgr4_byte = 'r1g2b1', # Packed RGB 1:2:1,  8bpp, (msb)1B 2G 1R(lsb)
+        # rgb8      = 'r3g3b2', # Packed RGB 3:3:2,  8bpp, (msb)2R 3G 3B(lsb)
+        # rgb4      = 'r1g2b1', # Packed RGB 1:2:1,  4bpp, (msb)2R 3G 3B(lsb)
+        # rgb4_byte = 'r1g2b1', # Packed RGB 1:2:1,  8bpp, (msb)2R 3G 3B(lsb)
+        
+        # rgb32_1     = '',   # Packed RGB 8:8:8, 32bpp, (msb)8R 8G 8B 8A(lsb), in cpu endianness
+        # bgr32_1     = '',   # Packed RGB 8:8:8, 32bpp, (msb)8B 8G 8R 8A(lsb), in cpu endianness
+        # gray16be    = '',   #        Y        , 16bpp, big-endian
+        # gray16le    = '',   #        Y        , 16bpp, little-endian
     )
     
     # cache for bits per pixels
@@ -369,7 +415,7 @@ assert PixelFormat("rgb") == PixelFormat("rgb888")
 assert PixelFormat("rgb888") == PixelFormat("r8g8b8")
 assert PixelFormat("rgb") != PixelFormat("xrgb")
 
-assert PixelFormat("uyvy") == ((2, (('y', ((8, 8), (24, 8))), ('u', ((0, 8),)), ('v', ((16, 8),))), (1, 1)),)
+assert PixelFormat("uyvy422") == ((2, (('y', ((8, 8), (24, 8))), ('u', ((0, 8),)), ('v', ((16, 8),))), (1, 1)),)
 
 
 assert PixelFormat("rgb") == ((1, (('r', ((0, 8),)), ('b', ((16, 8),)), ('g', ((8, 8),))), (1, 1)),)
@@ -388,7 +434,7 @@ assert PixelFormat("r8g8b8").name == "rgb"
 
 assert PixelFormat("rgb").bits_per_pixel == 24
 assert PixelFormat("rgba").bits_per_pixel == 32
-assert PixelFormat("uyvy").bits_per_pixel == 16
+assert PixelFormat("uyvy422").bits_per_pixel == 16
 assert PixelFormat("yuv420p").bits_per_pixel == 12
 assert PixelFormat("yuv420p").name == "yuv420p"
 assert PixelFormat("rgb").is_planar == False
@@ -408,14 +454,19 @@ assert PixelFormat("yuv844p").name == "yuv422p"
 assert PixelFormat("yuv840p").name == "yuv420p"
 assert PixelFormat(PixelFormat("yuv888p").name) == PixelFormat("yuv888p")
 
-# NOTE YUV format names get a special treatment
+assert PixelFormat("nv12").bits_per_pixel == 12
+assert PixelFormat("nv12")[1].bits_per_sample == 16
+
+# a format without a name:
+planes = PixelFormat("yuv420p")
+pf = PixelFormat((planes[0]._replace(subsampling=(2,2)), planes[1], planes[2]))
+assert pf == PixelFormat(pf.name)
+
+
+# XX YUV format names get a special treatment
 # no yuv format, numbers are interpreted as bit widths
 # rather than a subsampling specification:
 assert PixelFormat("yua422p").name == 'y4u2a2p'
 
 # XXX maybe it is a good idea to drop postfix bit width specification because of this
 
-planes = PixelFormat("yuv420p")
-pf = PixelFormat((planes[0]._replace(subsampling=(2,2)), planes[1], planes[2]))
-assert pf.name == "(PixelPlaneFormat(span=1, channels=(('y', ((0, 8),)),), subsampling=(2, 2)), PixelPlaneFormat(span=1, channels=(('u', ((0, 8),)),), subsampling=(2, 2)), PixelPlaneFormat(span=1, channels=(('v', ((0, 8),)),), subsampling=(2, 2)))"
-assert pf == PixelFormat(pf.name)
