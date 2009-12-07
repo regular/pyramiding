@@ -1,7 +1,7 @@
 import re
 from collections import namedtuple
 
-class MalformedPlaneFormat(Exception):
+class MalformedPlaneFormat(ValueError):
     pass
 
 class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling")):
@@ -35,7 +35,7 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
         
         t = cls._parse_plane(plane_description)
         if t is None:
-            raise MalformedPlaneFormat()
+            raise MalformedPlaneFormat("invalid plane descrition: %s" % plane_description)
         return cls._make(t)
     
     @property
@@ -142,10 +142,10 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
             if m:
                 names, widths = m.groups()
                 if len(names) != len(widths):
-                    raise MalformedPlaneFormat()
+                    raise MalformedPlaneFormat("invalid channel layout: %s" % s)
                 channels = zip(names, widths)
             else:
-                raise MalformedPlaneFormat()
+                raise MalformedPlaneFormat("invalid channel layout: %s" % s)
         
         pos = 0
         d = {}
