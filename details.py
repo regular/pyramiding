@@ -207,7 +207,7 @@ class PixelFormat(tuple):
         # bgr32     = 'x8b8g8r8',   # Packed RGB 8:8:8, 32bpp, (msb)8A 8B 8G 8R(lsb), in cpu endianness
         # bgr565    = 'b5g6r5'  # Packed RGB 5:6:5, 16bpp, (msb)   5B 6G 5R(lsb), in cpu endianness
         # bgr555    = 'x1b5g5r5'    # Packed RGB 5:5:5, 16bpp, (msb)1A 5B 5G 5R(lsb), in cpu endianness most significant bit to 1
-        # rgb565        = 'r5g6b5', # Packed RGB 5:6:5, 16bpp, (msb)   5R 6G 5B(lsb), in cpu endianness
+        # rgb565    = 'r5g6b5', # Packed RGB 5:6:5, 16bpp, (msb)   5R 6G 5B(lsb), in cpu endianness
         # bgr8      = 'b3g3r2', # Packed RGB 3:3:2,  8bpp, (msb)2B 3G 3R(lsb)
         # bgr4      = 'b1g2r1', # Packed RGB 1:2:1,  4bpp, (msb)1B 2G 1R(lsb)
         # bgr4_byte = 'r1g2b1', # Packed RGB 1:2:1,  8bpp, (msb)1B 2G 1R(lsb)
