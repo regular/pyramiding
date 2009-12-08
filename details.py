@@ -1,10 +1,11 @@
 import re
-from collections import namedtuple
+import operator
+import collections
 
 class MalformedPlaneFormat(ValueError):
     pass
 
-class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling")):
+class PixelPlaneFormat(collections.namedtuple("PixelPlaneFormat", "span channels subsampling")):
     '''PixelFormat describes the layout of one plane of pixel data. See __new__ for
        details.
     '''
@@ -35,17 +36,16 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
         
         t = cls._parse_plane(plane_description)
         if t is None:
-            raise MalformedPlaneFormat("invalid plane descrition: %s" % plane_description)
+            raise MalformedPlaneFormat("invalid plane description: %s" % str(plane_description))
         return cls._make(t)
     
     @property
     def bits_per_sample(self):
         '''return number of bits per sample in this plane.'''
-        plane_total = 0.0
         n, layout, subsampling = self
+        plane_total = 0.0
         for channel, fractions in layout:
-            for start, width in fractions:
-                plane_total += width
+            plane_total = reduce(lambda x, fraction: x+ fraction[1], fractions, plane_total)
         return plane_total
    
     def __repr__(self):
@@ -71,8 +71,7 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
         if subsampling != (1,1):
             s += ", " + repr(subsampling)
 
-        s = '(%s)' %s
-        return s     
+        return '(%s)' %s
     
     @property
     def name(self):
@@ -80,11 +79,10 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
         # if n is one and subsampling is (1,1)
         # we simply concatente channel names and bit widths in order
         if n==1 and subsampling==(1,1):
-            sorted_channels = [(pos, name) for name, pos in channels]
-            sorted_channels.sort()
+            sorted_channels = sorted(channels, key =operator.itemgetter(1))
             i = 0
             result=""
-            for pos, name in sorted_channels:
+            for name, pos in sorted_channels:
                 if len(pos)>1:
                     # uh, the channel is not a continous range in memory
                     result = None
@@ -112,12 +110,12 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
             if len(x) == 3:
                 t = x
             if len(x) == 2:
-                if type(x[0]) == int and (type(x[1]) == str or type(x[1])==tuple):
+                types = map(type, x)
+                if types == [int, str] or types == [int, tuple]: 
                     t = x + ((1,1),)
-                elif (type(x[0])==str or type(x[0])==tuple) and type(x[1])==tuple:
+                elif types == [str, tuple] or types == [tuple, tuple]: 
                     # can x[1] be a subsampling spec?
-                    # XXX this is ugly
-                    if len(x[1]) == 2 and type(x[1][0])  in (int, float) and type(x[1][1]) in (int, float): 
+                    if len(x[1]) == 2 and set(map(type, x[1])) <= set((int, float)):
                         t = (1,) + x
         
         if t is None: return None
@@ -148,17 +146,12 @@ class PixelPlaneFormat(namedtuple("PixelPlaneFormat", "span channels subsampling
                 raise MalformedPlaneFormat("invalid channel layout: %s" % s)
         
         pos = 0
-        d = {}
+        d = collections.defaultdict(list)
         for name, width in channels:
             width = int(width)
-            if not name in d.keys():
-                d [name] = [(pos, width)]
-            else:
-                d[name].append((pos, width))
-            
+            d[name].append((pos, width))            
             pos += width
-        for k,v in d.items(): d[k]=tuple(v)
-        return tuple(d.items())
+        return tuple((k,tuple(v)) for k,v in d.items())
 
 
 class PixelFormat(tuple):
@@ -238,7 +231,7 @@ class PixelFormat(tuple):
         planes = None
         if type(description) == str:
             # description is one of the pixel format names we know about?
-            if description in cls._named_formats.keys():
+            if description in cls._named_formats:
                 x = cls._named_formats[description]
                 planes = cls._parse_description(x)
                 # store normalized form in class dictionary
@@ -251,13 +244,11 @@ class PixelFormat(tuple):
     @property
     def name(self):
         '''return a normalized string identifier that is accepted by __new__()'''
-        for k,v in self._named_formats.items():
-            if v == self:
-                return k
+        name = collections.defaultdict(lambda: None, ((v,k) for k,v in self._named_formats.items()))[self]
+        if name: return name
         
         result = self._make_yuv_name(self)
-        if result is not None:
-            return result
+        if result: return result
         
         if len(self) == 1:
             return self[0].name
@@ -273,13 +264,10 @@ class PixelFormat(tuple):
         if self in self._bpp.keys():
             return self._bpp[self]
         
-        total = 0.0
-        for p in self:
-            plane_total = p.bits_per_sample
-            n, d, subsampling = p
-            plane_total /= n * (lambda x, y: x*y)(*subsampling)
-            total += plane_total
-        
+        total = reduce(
+            lambda run, p: 
+                run + p.bits_per_sample / (p.span * operator.mul(*p.subsampling)),
+             self, 0.0)
         PixelFormat._bpp[self] = total
         return total
     
@@ -298,15 +286,18 @@ class PixelFormat(tuple):
             else:
                 if description[0]=="(" and description[-1] == ")":
                     # evaluate repr string in a sondbox without __builtins__
-                    result = eval(description, dict(__builtins__=None), dict(PixelPlaneFormat=PixelPlaneFormat))
-                    if type(result) == tuple:
-                        description = result
+                    try:
+                        result = eval(description, dict(__builtins__=None), dict(PixelPlaneFormat=PixelPlaneFormat))
+                        if type(result) == tuple:
+                            description = result
+                    except Exception:
+                        pass
                 
                 elif description[-1].lower()=="p":
                     make_planar=True
                     description = description[:-1]
         
-        if type(description) == tuple or type(description) == list:
+        if type(description) in (tuple, list):
             result = cls._parse_planes(description)
         else:
             result = (PixelPlaneFormat.from_description(description),)
@@ -317,10 +308,10 @@ class PixelFormat(tuple):
     
     @classmethod
     def _make_planar(cls, t):
-        '''convert a given non-planar format into a planar format
+        '''Convert a given non-planar format into a planar format
            by putting each channel on a separate plane.
            If channels are not continous within a pixel,
-           there will be one plane per continois region.
+           there will be one plane per continous region.
         '''
         assert len(t)==1
         n, channels, subsampling = t[0]
@@ -352,44 +343,36 @@ class PixelFormat(tuple):
         
         # we only have names for formats with one channel per
         # plane that has a width of 8 bits
-        components = []
-        for plane in t:
-            if len(plane.channels) != 1:
-                return
-            name, pos = plane.channels[0]
-            name = name.lower()
-            
-            if len(pos) != 1:
-                return None
-            start, width = pos[0]
-            if start != 0 or width != 8:
-                return None
-            
-            if name not in "yuv":
-                return None
-            
-            components.append((name, plane.subsampling))
-        
-        # do we have a channel on more than one plane?
-        names = [name for name, ss in components]
-        if len(names) != len(set(names)):
-            return None
-        
+        components = [
+            (name.lower(), ss)
+            for span, channels, ss in t
+            if len(channels) == 1 
+            for name, pos in channels 
+            if span == 1
+            and pos == ((0,8),)
+            and name in 'YUVyuv'
+        ]
+
         if len(components) != 3:
             return None
-        
-        components = dict(components)
-        
-        # y component must have full resolution
-        if components['y'] != (1,1):
+                
+        comp_dict = dict(components)
+
+        # do we have a channel on more than one plane?
+        if len(comp_dict) != len(components):
             return None
         
-        # chromo components must have the same subsampling
-        if components['u'] != components['v']:
+        # y component must have full resolution
+        if comp_dict['y'] != (1,1):
+            return None
+        
+        # chroma components must have the same subsampling
+        if comp_dict['u'] != comp_dict['v']:
             return None
         
         # okay, we will be able to name the beast
-        chroma_subsampling = components['u']
+        # see http://en.wikipedia.org/wiki/Chroma_subsampling
+        chroma_subsampling = comp_dict['u']
         luma_width = chroma_subsampling[0]
         chroma_samples_row1 = 1
         if chroma_subsampling[1] == 1:
@@ -402,14 +385,13 @@ class PixelFormat(tuple):
         if m<3:
             # normalize to luma_width == 4
             numbers = map(lambda x: x*4/m, numbers)
-        return "%s%s%s%d%d%dp" % tuple(names + numbers)
+        return "%s%s%s%d%d%dp" % tuple([name for name,_ in components] + numbers)
     
     @classmethod
     def _parse_yuv_name(cls, name):
         m = cls._yuv_pattern.match(name)
         if m:
             # see http://en.wikipedia.org/wiki/Chroma_subsampling
-            # to understand this
             luma_width, chroma_samples_row1, chroma_samples_row2  = [int(x) for x in m.groups()]
             horizontal_subsampling = float(luma_width) / chroma_samples_row1
             vertical_subsampling = None
@@ -431,13 +413,9 @@ class PixelFormat(tuple):
         try:
             return (PixelPlaneFormat.from_description(one_or_more_planes),)
         except MalformedPlaneFormat:
-            pass # no, it wasn't
+            pass # no, it isn't
         
-        planes = []
-        for x in one_or_more_planes:
-            t = PixelPlaneFormat.from_description(x)
-            planes.append(t)
-        return tuple(planes)
+        return tuple(map(PixelPlaneFormat.from_description, one_or_more_planes))
 
 
 assert PixelFormat("rgb") == PixelFormat("rgb888")
@@ -489,11 +467,10 @@ planes = PixelFormat("yuv420p")
 pf = PixelFormat((planes[0]._replace(subsampling=(2,2)), planes[1], planes[2]))
 assert pf == PixelFormat(pf.name)
 
-# XX YUV format names get a special treatment
-# no yuv format, numbers are interpreted as bit widths
-# rather than a subsampling specification:
-# XXX maybe it is a good idea to drop postfix bit width specification because of this
-
+# XXX YUV format names get a special treatment.
+# The following is no yuv format, numbers are interpreted as bit widths
+# in postfix notation rather than a subsampling specification:
+# Maybe it is a good idea to drop postfix bit width syntax because of this.
 assert PixelFormat("yua422p").name == 'y4u2a2p'
 
 
